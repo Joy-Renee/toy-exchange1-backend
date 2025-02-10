@@ -14,7 +14,7 @@ app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///users.db"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["JWT_SECRET_KEY"] = "your_secret_key"
 
-db = SQLAlchemy(app)
+# db = SQLAlchemy(app)
 db.init_app(app)
 bcrypt = Bcrypt(app)
 jwt = JWTManager(app)
@@ -22,6 +22,10 @@ jwt = JWTManager(app)
 # Create the database tables
 with app.app_context():
     db.create_all()
+
+@app.route("/")
+def home():
+    return "Welcome to the Chat App of the toy exchange project website!"
 
 # User signup
 @app.route("/signup", methods=["POST"])
@@ -59,4 +63,4 @@ def handle_send_message(data):
 
 # Start Flask App
 if __name__ == "__main__":
-    socketio.run(app, debug=True, host="0.0.0.0", port=5000)
+    socketio.run(app, debug=True)
