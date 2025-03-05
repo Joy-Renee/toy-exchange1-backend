@@ -1,14 +1,14 @@
 from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_bcrypt import Bcrypt
-from flask_jwt_extended import JWTManager, create_access_token
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
 from flask_cors import CORS
-from flask_socketio import SocketIO, emit, join_room
-from models import db, User, Message
+from flask_socketio import SocketIO, emit, join_room, leave_room
+from datetime import datetime
+from models import db, User, Message, Toy, Payment, Exchange
 
 app = Flask(__name__)
-CORS(app)
-socketio = SocketIO(app, cors_allowed_origins="*")  # Enable WebSocket connections
+
 
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///toys.db"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
@@ -18,6 +18,9 @@ app.config["JWT_SECRET_KEY"] = "your_secret_key"
 db.init_app(app)
 bcrypt = Bcrypt(app)
 jwt = JWTManager(app)
+CORS(app)
+socketio = SocketIO(app, cors_allowed_origins="*")  # Enable WebSocket connections
+
 
 # Create the database tables
 with app.app_context():
