@@ -38,6 +38,8 @@ class Message(db.Model):
     receiver_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
     buyer_toy_id = db.Column(db.Integer, db.ForeignKey("toys.id"))
     seller_toy_id = db.Column(db.Integer, db.ForeignKey("toys.id"))
+    room = db.Column(db.String(100), nullable=False)  # 🔥 Add room column
+
 
     sender = db.relationship('User', foreign_keys=[sender_id], backref='sent_messages')
     receiver  = db.relationship('User', foreign_keys=[receiver_id], backref='received_messages')
