@@ -1,66 +1,166 @@
 from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_bcrypt import Bcrypt
-from flask_jwt_extended import JWTManager, create_access_token
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
 from flask_cors import CORS
-from flask_socketio import SocketIO, emit, join_room
-from models import db, User, Message
+from flask_socketio import SocketIO, send, emit, join_room, leave_room
+from models import db, User, Message, Toy  # Import models
 
 app = Flask(__name__)
-CORS(app)
-socketio = SocketIO(app, cors_allowed_origins="*")  # Enable WebSocket connections
 
-app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///users.db"
+# Configure Flask app
+app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///toy_trading.db"  # Change for production
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
-app.config["JWT_SECRET_KEY"] = "your_secret_key"
+app.config["JWT_SECRET_KEY"] = "supersecretkey"  # Change in production
 
-# db = SQLAlchemy(app)
+# Initialize extensions
 db.init_app(app)
 bcrypt = Bcrypt(app)
 jwt = JWTManager(app)
+CORS(app)
+socketio = SocketIO(app, cors_allowed_origins="*")  # Enable real-time chat
 
-# Create the database tables
-with app.app_context():
-    db.create_all()
-
-@app.route("/")
-def home():
-    return "Welcome to the Chat App of the toy exchange project website!"
-
-# User signup
+# ============================
+# 1️⃣ USER SIGNUP (REGISTER)
+# ============================
 @app.route("/signup", methods=["POST"])
 def signup():
     data = request.json
-    hashed_password = bcrypt.generate_password_hash(data["password"]).decode("utf-8")
-    new_user = User(username=data["username"], email=data["email"], password=hashed_password)
+    username = data.get("username")
+    email = data.get("email")
+    phone_number = data.get("phone_number")
+    password = data.get("password")
+
+    if User.query.filter_by(email=email).first():
+        return jsonify({"error": "Email already exists"}), 400
+
+    hashed_password = bcrypt.generate_password_hash(password).decode("utf-8")
+    new_user = User(username=username, email=email, phone_number=phone_number, password=hashed_password)
+
     db.session.add(new_user)
     db.session.commit()
-    return jsonify({"message": "User created successfully!"}), 201
+    return jsonify({"message": "User registered successfully!"}), 201
 
-# User login
+# ============================
+# 2️⃣ USER LOGIN
+# ============================
 @app.route("/login", methods=["POST"])
 def login():
     data = request.json
-    user = User.query.filter_by(email=data["email"]).first()
-    if user and bcrypt.check_password_hash(user.password, data["password"]):
+    email = data.get("email")
+    password = data.get("password")
+
+    user = User.query.filter_by(email=email).first()
+    if user and bcrypt.check_password_hash(user.password, password):
         access_token = create_access_token(identity=user.id)
-        return jsonify({"access_token": access_token}), 200
-    return jsonify({"message": "Invalid credentials"}), 401
+        return jsonify({"access_token": access_token, "user_id": user.id}), 200
+    return jsonify({"error": "Invalid email or password"}), 401
+
+# ============================
+# 3️⃣ HOME PAGE (SHOW TOYS)
+# ============================
+@app.route("/home", methods=["GET"])
+def home():
+    toys = Toy.query.all()
+    toy_list = [{"id": toy.id, "name": toy.name, "price": toy.price, "image": toy.image_filename} for toy in toys]
+    return jsonify(toy_list), 200
+
+# ============================
+# 4️⃣ REAL-TIME CHAT (WebSockets)
+# ============================
+
+# Store chat rooms
+rooms = {}
+
+# Handle user joining a room
+@socketio.on("join")
+def handle_join(data):
+    username = data["user"]
+    room = data["room"]
+    
+    join_room(room)
+    emit("message", {"user": "System", "text": f"{username} has joined the chat."}, room=room)
 
 # Handle sending messages
-@socketio.on("send_message")
-def handle_send_message(data):
-    sender_id = data["sender_id"]
-    receiver_id = data["receiver_id"]
+@socketio.on("message")
+def handle_message(data):
+    sender = data["user"]
     message_text = data["message"]
+    room = data["room"]
 
-    new_message = Message(sender_id=sender_id, receiver_id=receiver_id, message=message_text)
+    sender_user = User.query.filter_by(username=sender).first()
+    if not sender_user:
+        return  # Don't store messages from unknown users
+
+    # Get receiver from the room (assuming room names are unique for users)
+    receiver_user = User.query.filter(User.username != sender).first()  
+
+    # Store in database
+    new_message = Message(
+        message_text=message_text,
+        sender_id=sender_user.id,
+        receiver_id=receiver_user.id if receiver_user else None
+    )
+
     db.session.add(new_message)
     db.session.commit()
 
-    room = f"chat_{min(sender_id, receiver_id)}_{max(sender_id, receiver_id)}"
-    emit("receive_message", data, room=room)
+    # Emit the message back to all clients
+    emit("message", {"user": sender, "text": message_text}, room=room)
 
-# Start Flask App
+# Handle user leaving a room
+@socketio.on("leave")
+def handle_leave(data):
+    username = data["user"]
+    room = data["room"]
+
+    leave_room(room)
+    emit("message", {"user": "System", "text": f"{username} has left the chat."}, room=room)
+
+# ============================
+# 5️⃣ Fetch messages from database
+# ============================
+
+@app.route("/messages/<room>", methods=["GET"])
+def get_messages(room):
+    messages = Message.query.all()
+    messages_data = [
+        {
+            "id": msg.id,
+            "message": msg.message_text,
+            "timestamp": msg.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+            "sender": User.query.get(msg.sender_id).username,
+        }
+        for msg in messages
+    ]
+    return {"messages": messages_data}, 20
+
+
+# ============================
+# 5️⃣ PROFILE PAGE
+# ============================
+@app.route("/profile", methods=["GET"])
+@jwt_required()
+def profile():
+    user_id = get_jwt_identity()
+    user = User.query.get(user_id)
+    
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    user_info = {
+        "id": user.id,
+        "username": user.username,
+        "email": user.email,
+        "phone_number": user.phone_number,
+        "toys": [{"id": toy.id, "name": toy.name, "price": toy.price} for toy in user.toys]
+    }
+    return jsonify(user_info), 200
+
+# ============================
+# 6️⃣ RUN SERVER
+# ============================
 if __name__ == "__main__":
-    socketio.run(app, debug=True)
+    with app.app_context():
+        db.create_all()  # Create tables if they don’t exist
+    socketio.run(app, debug=True, host="0.0.0.0", port=5000)  # Run with SocketIO
