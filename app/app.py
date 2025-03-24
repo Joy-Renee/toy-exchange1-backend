@@ -84,25 +84,57 @@ def handle_join(data):
 # Handle sending messages
 @socketio.on("message")
 def handle_message(data):
+    sender = data["user"]
+    message_text = data["message"]
     room = data["room"]
-    message = {"user": data["user"], "text": data["message"]}
-    
-    # Store messages in room
-    if room in rooms:
-        rooms[room].append(message)
-    else:
-        rooms[room] = [message]
-    
-    emit("message", message, room=room)
+
+    sender_user = User.query.filter_by(username=sender).first()
+    if not sender_user:
+        return  # Don't store messages from unknown users
+
+    # Get receiver from the room (assuming room names are unique for users)
+    receiver_user = User.query.filter(User.username != sender).first()  
+
+    # Store in database
+    new_message = Message(
+        message_text=message_text,
+        sender_id=sender_user.id,
+        receiver_id=receiver_user.id if receiver_user else None
+    )
+
+    db.session.add(new_message)
+    db.session.commit()
+
+    # Emit the message back to all clients
+    emit("message", {"user": sender, "text": message_text}, room=room)
 
 # Handle user leaving a room
 @socketio.on("leave")
 def handle_leave(data):
     username = data["user"]
     room = data["room"]
-    
+
     leave_room(room)
     emit("message", {"user": "System", "text": f"{username} has left the chat."}, room=room)
+
+# ============================
+# 5️⃣ Fetch messages from database
+# ============================
+
+@app.route("/messages/<room>", methods=["GET"])
+def get_messages(room):
+    messages = Message.query.all()
+    messages_data = [
+        {
+            "id": msg.id,
+            "message": msg.message_text,
+            "timestamp": msg.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+            "sender": User.query.get(msg.sender_id).username,
+        }
+        for msg in messages
+    ]
+    return {"messages": messages_data}, 20
+
 
 # ============================
 # 5️⃣ PROFILE PAGE
