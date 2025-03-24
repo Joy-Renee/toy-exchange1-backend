@@ -4,6 +4,7 @@ from flask_bcrypt import Bcrypt
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
 from flask_cors import CORS
 from flask_socketio import SocketIO, send, emit, join_room, leave_room
+from flask_migrate import Migrate
 from models import db, User, Message, Toy  # Import models
 
 app = Flask(__name__)
@@ -19,6 +20,7 @@ bcrypt = Bcrypt(app)
 jwt = JWTManager(app)
 CORS(app)
 socketio = SocketIO(app, cors_allowed_origins="*")  # Enable real-time chat
+migrate = Migrate(app, db)
 
 # ============================
 # 1️⃣ USER SIGNUP (REGISTER)
@@ -99,14 +101,15 @@ def handle_message(data):
     new_message = Message(
         message_text=message_text,
         sender_id=sender_user.id,
-        receiver_id=receiver_user.id if receiver_user else None
+        receiver_id=receiver_user.id if receiver_user else None,
+        room=room # ✅ Store room in the database
     )
 
     db.session.add(new_message)
     db.session.commit()
 
     # Emit the message back to all clients
-    emit("message", {"user": sender, "text": message_text}, room=room)
+    emit("message", {"user": sender, "text": message_text, "room": room}, room=room)
 
 # Handle user leaving a room
 @socketio.on("leave")
@@ -123,7 +126,8 @@ def handle_leave(data):
 
 @app.route("/messages/<room>", methods=["GET"])
 def get_messages(room):
-    messages = Message.query.all()
+    messages = Message.query.filter_by(room=room).all()  # 🔥 Filter by room!
+    
     messages_data = [
         {
             "id": msg.id,
@@ -133,7 +137,7 @@ def get_messages(room):
         }
         for msg in messages
     ]
-    return {"messages": messages_data}, 20
+    return {"messages": messages_data}, 200
 
 
 # ============================
