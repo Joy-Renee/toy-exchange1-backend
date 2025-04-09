@@ -10,6 +10,10 @@ flask-jwt-extended = "*"
 flask-cors = "*"
 flask-socketio = "*"
 eventlet = "*"
+flask-migrate = "*"
+flask = "*"
+alembic = "*"
+jinja2 = "*"
 
 [dev-packages]
 
