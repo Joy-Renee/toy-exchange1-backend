@@ -54,7 +54,7 @@ def login():
 
     user = User.query.filter_by(email=email).first()
     if user and bcrypt.check_password_hash(user.password, password):
-        access_token = create_access_token(identity=user.id)
+        access_token = create_access_token(identity=str(user.id))
         return jsonify({"access_token": access_token, "user_id": user.id}), 200
     return jsonify({"error": "Invalid email or password"}), 401
 
@@ -143,23 +143,57 @@ def get_messages(room):
 # ============================
 # 5️⃣ PROFILE PAGE
 # ============================
-@app.route("/profile", methods=["GET"])
+@app.route('/profile', methods=['GET'])
 @jwt_required()
-def profile():
-    user_id = get_jwt_identity()
+def get_profile():
+    user_id = int(get_jwt_identity())
     user = User.query.get(user_id)
-    
     if not user:
         return jsonify({"error": "User not found"}), 404
 
-    user_info = {
-        "id": user.id,
+    toys = [
+        {
+            "id": toy.id,
+            "name": toy.name,
+            "age_group": toy.age_group,
+            "description": toy.description,
+            "condition": toy.condition,
+            "price": toy.price,
+            "image_filename": toy.image_filename
+        } for toy in user.toys
+    ]
+
+    return jsonify({
         "username": user.username,
         "email": user.email,
         "phone_number": user.phone_number,
-        "toys": [{"id": toy.id, "name": toy.name, "price": toy.price} for toy in user.toys]
-    }
-    return jsonify(user_info), 200
+        "toys": toys
+    }), 200
+
+
+@app.route('/create-toy', methods=['POST'])
+@jwt_required()
+def create_toy():
+    user_id = get_jwt_identity()
+    data = request.get_json()
+    print("Received toy data:", data)  # Add this line to debug
+
+    required_fields = ["name", "age_group", "description", "condition", "price", "image_filename"]
+    if not all(field in data and data[field] for field in required_fields):
+        return jsonify({"error": "Missing or invalid toy data"}), 422
+
+    toy = Toy(
+        name=data['name'],
+        age_group=data['age_group'],
+        description=data['description'],
+        condition=data['condition'],
+        price=data['price'],
+        image_filename=data['image_filename'],
+        user_id=user_id
+    )
+    db.session.add(toy)
+    db.session.commit()
+    return jsonify({"message": "Toy created successfully"}), 201
 
 # ============================
 # 6️⃣ RUN SERVER
